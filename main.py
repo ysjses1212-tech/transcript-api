@@ -6,7 +6,7 @@ import os
 app = Flask(__name__)
 CORS(app)
 
-SUPADATA_API_KEY = "sd_5a32b984e1add286bf167cbc40eb564c"
+SUPADATA_API_KEY = "sd_5a32b084e1add286bf167cbc40eb564c"
 
 @app.route('/')
 def home():
