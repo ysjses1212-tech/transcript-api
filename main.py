@@ -26,37 +26,17 @@ def get_transcript():
             "x-api-key": SUPADATA_API_KEY
         }
         params = {
-            "videoId": video_id,
-            "lang": "ko"
+            "videoId": video_id
         }
         
         response = requests.get(url, headers=headers, params=params)
-        data = response.json()
         
-        if response.status_code != 200:
-            # 한국어 없으면 영어로 재시도
-            params["lang"] = "en"
-            response = requests.get(url, headers=headers, params=params)
-            data = response.json()
-        
-        if response.status_code != 200:
-            return jsonify({"error": "자막을 찾을 수 없습니다", "video_id": video_id}), 404
-        
-        # 자막 텍스트 합치기
-        if "content" in data:
-            transcript = data["content"]
-        elif "transcript" in data:
-            if isinstance(data["transcript"], list):
-                transcript = " ".join([item.get("text", "") for item in data["transcript"]])
-            else:
-                transcript = data["transcript"]
-        else:
-            transcript = str(data)
-        
+        # 디버그: 원본 응답 그대로 반환
         return jsonify({
-            "success": True,
+            "status_code": response.status_code,
             "video_id": video_id,
-            "transcript": transcript
+            "raw_response": response.json() if response.text else None,
+            "response_text": response.text[:1000] if response.text else None
         })
         
     except Exception as e:
