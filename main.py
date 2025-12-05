@@ -15,28 +15,50 @@ def home():
 @app.route('/api/transcript', methods=['GET'])
 def get_transcript():
     video_id = request.args.get('video_id')
+    lang = request.args.get('lang', 'ko')
     
     if not video_id:
         return jsonify({"error": "video_id가 필요합니다"}), 400
     
     try:
-        # Supadata API 호출
-        url = f"https://api.supadata.ai/v1/youtube/transcript"
+        url = "https://api.supadata.ai/v1/youtube/transcript"
         headers = {
             "x-api-key": SUPADATA_API_KEY
         }
         params = {
-            "videoId": video_id
+            "videoId": video_id,
+            "lang": lang
         }
         
         response = requests.get(url, headers=headers, params=params)
+        data = response.json()
         
-        # 디버그: 원본 응답 그대로 반환
+        if response.status_code != 200:
+            # 한국어 없으면 영어로 재시도
+            if lang == "ko":
+                params["lang"] = "en"
+                response = requests.get(url, headers=headers, params=params)
+                data = response.json()
+        
+        if response.status_code != 200:
+            return jsonify({"error": "자막을 찾을 수 없습니다", "video_id": video_id}), 404
+        
+        # 자막 텍스트 합치기 ([Music] 같은 거 제외)
+        content = data.get("content", [])
+        texts = []
+        for item in content:
+            text = item.get("text", "")
+            if text and not text.startswith("["):
+                texts.append(text)
+        
+        transcript = " ".join(texts)
+        
         return jsonify({
-            "status_code": response.status_code,
+            "success": True,
             "video_id": video_id,
-            "raw_response": response.json() if response.text else None,
-            "response_text": response.text[:1000] if response.text else None
+            "lang": data.get("lang", lang),
+            "available_langs": data.get("availableLangs", []),
+            "transcript": transcript
         })
         
     except Exception as e:
