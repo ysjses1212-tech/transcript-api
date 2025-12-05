@@ -1,25 +1,12 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import subprocess
+import requests
 import os
-import re
 
 app = Flask(__name__)
 CORS(app)
 
-def clean_vtt(text):
-    lines = text.split('\n')
-    result = []
-    seen = set()
-    for line in lines:
-        if '-->' in line or line.startswith('WEBVTT') or line.strip().isdigit():
-            continue
-        if line.strip() and not line.startswith('Kind:') and not line.startswith('Language:'):
-            clean = re.sub(r'<[^>]+>', '', line).strip()
-            if clean and clean not in seen:
-                seen.add(clean)
-                result.append(clean)
-    return ' '.join(result)
+SUPADATA_API_KEY = "sd_5a32b984e1add286bf167cbc40eb564c"
 
 @app.route('/')
 def home():
@@ -33,64 +20,45 @@ def get_transcript():
         return jsonify({"error": "video_id가 필요합니다"}), 400
     
     try:
-        url = f"https://www.youtube.com/watch?v={video_id}"
-        
-        # yt-dlp 버전 확인
-        version_check = subprocess.run(['yt-dlp', '--version'], capture_output=True, text=True)
-        
-        # 자막 다운로드 시도
-        result = subprocess.run([
-            'yt-dlp',
-            '--skip-download',
-            '--write-sub',
-            '--write-auto-sub',
-            '--sub-lang', 'ko,en,ko-auto,en-auto',
-            '--sub-format', 'vtt/srt/best',
-            '-o', f'/tmp/{video_id}',
-            '--no-warnings',
-            url
-        ], capture_output=True, text=True, timeout=120)
-        
-        # 디버그 정보
-        debug_info = {
-            "yt_dlp_version": version_check.stdout.strip(),
-            "stdout": result.stdout[:500] if result.stdout else None,
-            "stderr": result.stderr[:500] if result.stderr else None,
-            "return_code": result.returncode
+        # Supadata API 호출
+        url = f"https://api.supadata.ai/v1/youtube/transcript"
+        headers = {
+            "x-api-key": SUPADATA_API_KEY
+        }
+        params = {
+            "videoId": video_id,
+            "lang": "ko"
         }
         
-        # 파일 찾기
-        transcript = ""
-        found_file = None
-        tmp_files = os.listdir('/tmp') if os.path.exists('/tmp') else []
-        matching_files = [f for f in tmp_files if video_id in f]
+        response = requests.get(url, headers=headers, params=params)
+        data = response.json()
         
-        for f in matching_files:
-            if f.endswith('.vtt') or f.endswith('.srt'):
-                filepath = f'/tmp/{f}'
-                with open(filepath, 'r', encoding='utf-8') as file:
-                    transcript = clean_vtt(file.read())
-                found_file = f
-                os.remove(filepath)
-                break
+        if response.status_code != 200:
+            # 한국어 없으면 영어로 재시도
+            params["lang"] = "en"
+            response = requests.get(url, headers=headers, params=params)
+            data = response.json()
         
-        if not transcript:
-            return jsonify({
-                "error": "자막을 찾을 수 없습니다",
-                "video_id": video_id,
-                "debug": debug_info,
-                "matching_files": matching_files
-            }), 404
+        if response.status_code != 200:
+            return jsonify({"error": "자막을 찾을 수 없습니다", "video_id": video_id}), 404
+        
+        # 자막 텍스트 합치기
+        if "content" in data:
+            transcript = data["content"]
+        elif "transcript" in data:
+            if isinstance(data["transcript"], list):
+                transcript = " ".join([item.get("text", "") for item in data["transcript"]])
+            else:
+                transcript = data["transcript"]
+        else:
+            transcript = str(data)
         
         return jsonify({
             "success": True,
             "video_id": video_id,
-            "transcript": transcript,
-            "file_used": found_file
+            "transcript": transcript
         })
         
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "시간 초과", "video_id": video_id}), 504
     except Exception as e:
         return jsonify({"error": str(e), "video_id": video_id}), 500
 
