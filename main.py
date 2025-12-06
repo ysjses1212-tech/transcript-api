@@ -99,7 +99,6 @@ def get_trends():
 # Gemini 키워드 추출 API (신규!)
 @app.route('/api/extract-keywords', methods=['GET', 'POST'])
 def extract_keywords():
-    # GET 또는 POST 둘 다 처리
     if request.method == 'POST':
         data = request.get_json() or {}
         title = data.get('title', '')
@@ -114,60 +113,68 @@ def extract_keywords():
         return jsonify({"error": "title이 필요합니다"}), 400
     
     try:
-        # Gemini API 호출
         prompt = f"""유튜브 영상의 검색 키워드를 추출해.
 
 제목: {title}
 설명: {description}
-스크립트 일부: {transcript[:1500] if transcript else '없음'}
+스크립트: {transcript[:1000] if transcript else '없음'}
 
 지시사항:
-- 이 영상을 찾기 위해 사람들이 유튜브에서 검색할 단어 3~5개 추출
-- 명사만 (예: 고릴라, 동물원, 꿀팁)
-- 동사/형용사/조사 제외 (예: 친해지는, 귀여운, 에서 제외)
-- 반드시 JSON 배열 형식으로만 응답
-
-예시 응답: ["고릴라", "동물", "꿀팁"]
+- 검색용 명사 키워드 3~5개 추출
+- JSON 배열로만 응답: ["키워드1", "키워드2"]
 
 응답:"""
 
-        response = requests.post(
+        gemini_response = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}",
             headers={"Content-Type": "application/json"},
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {"temperature": 0.3}
-            }
+            },
+            timeout=30
         )
         
-        result = response.json()
+        # 전체 응답 확인
+        status_code = gemini_response.status_code
         
-        # 디버그: 원본 응답 확인
-        raw_text = ""
         try:
-            raw_text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
+            result = gemini_response.json()
         except:
-            raw_text = str(result)
+            result = {"parse_error": gemini_response.text[:500]}
         
-        # JSON 파싱
-        import re
+        # 텍스트 추출 시도
+        raw_text = ""
         keywords = []
-        json_match = re.search(r'\[.*?\]', raw_text, re.DOTALL)
-        if json_match:
+        
+        if 'candidates' in result:
             try:
-                keywords = json.loads(json_match.group())
-            except:
-                pass
+                raw_text = result['candidates'][0]['content']['parts'][0]['text']
+                # JSON 파싱
+                import re
+                json_match = re.search(r'\[.*?\]', raw_text, re.DOTALL)
+                if json_match:
+                    keywords = json.loads(json_match.group())
+            except Exception as parse_err:
+                raw_text = f"파싱에러: {str(parse_err)}"
         
         return jsonify({
             "success": True,
             "keywords": keywords,
             "videoType": "keyword" if len(keywords) >= 2 else "content",
-            "debug_raw": raw_text[:500]  # 디버그용
+            "debug": {
+                "status_code": status_code,
+                "raw_text": raw_text[:300] if raw_text else "없음",
+                "full_result_keys": list(result.keys()) if isinstance(result, dict) else "not_dict",
+                "result_preview": str(result)[:500]
+            }
         })
         
+    except requests.exceptions.Timeout:
+        return jsonify({"error": "Gemini 타임아웃", "type": "timeout"}), 504
     except Exception as e:
         return jsonify({"error": str(e), "type": "exception"}), 500
+
 
 
 
