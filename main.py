@@ -9,7 +9,7 @@ app = Flask(__name__)
 CORS(app)
 
 SUPADATA_API_KEY = "sd_5a32b084e1add286bf167cbc40eb564c"
-GEMINI_API_KEY = "AIzaSyAehoi3X5r0zC89gjQnQr_UD5q0pJyTBIk"
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 
 @app.route('/')
 def home():
