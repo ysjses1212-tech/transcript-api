@@ -97,80 +97,70 @@ def get_trends():
         return jsonify({"error": str(e), "keyword": keyword}), 500
 
 # Gemini 키워드 추출 API (신규!)
-@app.route('/api/extract-keywords', methods=['POST'])
+@app.route('/api/extract-keywords', methods=['GET', 'POST'])
 def extract_keywords():
-    data = request.get_json()
-    
-    title = data.get('title', '')
-    description = data.get('description', '')
-    tags = data.get('tags', [])
-    transcript = data.get('transcript', '')
+    # GET 또는 POST 둘 다 처리
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        title = data.get('title', '')
+        description = data.get('description', '')
+        transcript = data.get('transcript', '')
+    else:
+        title = request.args.get('title', '')
+        description = request.args.get('description', '')
+        transcript = request.args.get('transcript', '')
     
     if not title:
         return jsonify({"error": "title이 필요합니다"}), 400
     
     try:
         # Gemini API 호출
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-        
-        prompt = f"""다음 유튜브 영상 정보를 분석해서 검색 키워드를 추출해줘.
+        prompt = f"""다음 유튜브 영상에서 검색용 키워드를 추출해줘.
 
 제목: {title}
-태그: {', '.join(tags) if tags else '없음'}
-설명: {description[:500] if description else '없음'}
-스크립트: {transcript[:1000] if transcript else '없음'}
+설명: {description}
+스크립트: {transcript[:2000] if transcript else '없음'}
 
 규칙:
-1. 사람들이 유튜브에서 실제로 검색할만한 키워드만 추출
-2. 명사 또는 명사구만 추출 (동사, 형용사, 조사 제외)
-3. 최소 2글자 이상
-4. 최대 5개까지만 추출
-5. 중요도 순으로 정렬
-6. 브랜드명, 제품명, 주제어, 인물명 우선
+1. 명사 위주로 추출 (동사/형용사/조사 제외)
+2. 사람들이 실제로 검색할만한 단어만
+3. 3~5개만 추출
+4. 한국어와 영어 모두 가능
+5. JSON 배열로만 응답: ["키워드1", "키워드2", "키워드3"]
 
-응답 형식 (JSON만, 다른 텍스트 없이):
-{{"keywords": ["키워드1", "키워드2", "키워드3"]}}
-"""
-        
-        headers = {"Content-Type": "application/json"}
-        body = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.1,
-                "maxOutputTokens": 200
+응답:"""
+
+        response = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}",
+            headers={"Content-Type": "application/json"},
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.1}
             }
-        }
+        )
         
-        response = requests.post(url, headers=headers, json=body)
         result = response.json()
         
-        # 응답에서 키워드 추출
-        if "candidates" in result and len(result["candidates"]) > 0:
-            text = result["candidates"][0]["content"]["parts"][0]["text"]
-            
-            # JSON 파싱 시도
-            try:
-                # JSON 부분만 추출
-                json_match = re.search(r'\{.*\}', text, re.DOTALL)
-                if json_match:
-                    keywords_data = json.loads(json_match.group())
-                    keywords = keywords_data.get("keywords", [])
-                else:
-                    keywords = []
-            except:
-                # JSON 파싱 실패시 텍스트에서 추출
-                keywords = re.findall(r'"([^"]+)"', text)[:5]
-            
-            return jsonify({
-                "success": True,
-                "keywords": keywords,
-                "videoType": "keyword" if len(keywords) >= 2 else "content"
-            })
+        # Gemini 응답에서 텍스트 추출
+        text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '[]')
+        
+        # JSON 파싱
+        import re
+        json_match = re.search(r'\[.*?\]', text, re.DOTALL)
+        if json_match:
+            keywords = json.loads(json_match.group())
         else:
-            return jsonify({"error": "Gemini 응답 오류", "raw": result}), 500
-            
+            keywords = []
+        
+        return jsonify({
+            "success": True,
+            "keywords": keywords,
+            "videoType": "keyword" if len(keywords) >= 2 else "content"
+        })
+        
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
