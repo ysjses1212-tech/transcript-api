@@ -75,7 +75,7 @@ def extract_keywords():
         return jsonify({"error": "title이 필요합니다"}), 400
     
     try:
-       prompt = f"""너는 유튜브 키워드 전문가야. 다음 영상에서 "검색용 키워드"를 추출해.
+        prompt = f"""너는 유튜브 키워드 전문가야. 다음 영상에서 "검색용 키워드"를 추출해.
 
 제목: {title}
 설명: {description}
@@ -116,8 +116,6 @@ def extract_keywords():
 - 영어 영상: ["Taliban (탈레반)", "Afghanistan (아프가니스탄)", "US Military (미군)"]
 
 응답 (JSON 배열만):"""
-
-
 
         gemini_response = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}",
@@ -163,6 +161,7 @@ def extract_keywords():
         return jsonify({"error": "Gemini 타임아웃", "type": "timeout"}), 504
     except Exception as e:
         return jsonify({"error": str(e), "type": "exception"}), 500
+
 @app.route('/api/related-keywords', methods=['GET'])
 def get_related_keywords():
     keyword = request.args.get('keyword', '')
@@ -171,33 +170,28 @@ def get_related_keywords():
         return jsonify({"error": "keyword 필요"}), 400
     
     try:
-        # YouTube 자동완성 API
         url = f"https://suggestqueries-clients6.youtube.com/complete/search?client=youtube&ds=yt&q={keyword}"
         response = requests.get(url, timeout=10)
         
-        # JSONP 응답 파싱
         text = response.text
-        # window.google.ac.h(...) 형태에서 JSON 추출
         start = text.find('(') + 1
         end = text.rfind(')')
         json_str = text[start:end]
         
-        import json
         data = json.loads(json_str)
         
-        # 연관 키워드 추출 (첫 번째 배열의 두 번째 요소)
         suggestions = []
         if len(data) > 1 and isinstance(data[1], list):
-            for item in data[1][:8]:  # 최대 8개
+            for item in data[1][:8]:
                 if isinstance(item, list) and len(item) > 0:
                     suggestion = item[0]
-                    if suggestion != keyword:  # 원본 키워드 제외
+                    if suggestion.lower() != keyword.lower():
                         suggestions.append(suggestion)
         
         return jsonify({
             "success": True,
             "keyword": keyword,
-            "related": suggestions[:6]  # 최대 6개
+            "related": suggestions[:6]
         })
         
     except Exception as e:
