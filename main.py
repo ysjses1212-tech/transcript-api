@@ -75,7 +75,7 @@ def extract_keywords():
         return jsonify({"error": "title이 필요합니다"}), 400
     
     try:
-        prompt = f"""너는 유튜브 키워드 전문가야. 다음 영상에서 "검색용 키워드"를 추출해.
+       prompt = f"""너는 유튜브 키워드 전문가야. 다음 영상에서 "검색용 키워드"를 추출해.
 
 제목: {title}
 설명: {description}
@@ -83,38 +83,44 @@ def extract_keywords():
 
 **중요: 스크립트는 자동생성 자막이라 오타가 많아!**
 - 문맥을 보고 올바른 단어로 보정해서 키워드 추출해
-- 예시: "스캔팬" → "스텐팬", "고릴나" → "고릴라", "에프16" → "F-16"
+- 예시: "스캔팬" → "스텐팬", "고릴나" → "고릴라"
 - 제목과 스크립트를 비교해서 올바른 표기 판단해
+
+**언어 규칙:**
+- 영어 영상이면 영어 키워드 그대로 추출
+- 한국어 영상이면 한국어 키워드 추출
+- 외국어 키워드는 원어 그대로 유지하고 괄호 안에 한글 번역 추가
+- 예시: "Taliban (탈레반)", "F-16 (전투기)", "Silverback (실버백)"
 
 **추출 규칙:**
 
 1. 반드시 제외할 대형 카테고리 키워드:
    - 동물, 식물, 사람, 인간, 남자, 여자, 음식, 요리, 여행, 스포츠, 게임, 영화, 음악
    - 자연, 과학, 역사, 경제, 정치, 기술, 건강, 교육, 엔터테인먼트, 예능, 뉴스
+   - animal, nature, people, food, travel, sports, game, movie, music 등
    - 이런 "분류/카테고리" 수준의 추상적 단어는 절대 포함하지 마
 
 2. 추출해야 할 키워드:
-   - 영상의 구체적인 주제/소재 (예: 고릴라, 와사비, 손흥민, 참치해체, 트랩)
+   - 영상의 구체적인 주제/소재
    - 사람들이 유튜브에서 실제로 검색할 구체적인 단어
    - 고유명사 우선 (인물명, 브랜드명, 특정 동물/식물 종류, 지명)
 
-3. 복합 키워드도 포함 가능:
-   - 단일: 고릴라, 와사비, 트랩
-   - 복합: 실버백 고릴라, 와사비 강판, 전장 트랩
+3. 복합 키워드도 포함 가능
 
 4. 3~5개만 추출
 
 5. JSON 배열로만 응답
 
 예시:
-- 좋은 키워드: ["고릴라", "실버백", "괴력", "침팬지"]
-- 나쁜 키워드: ["동물", "자연", "영상", "방법"]
+- 한국어 영상: ["고릴라", "실버백", "괴력"]
+- 영어 영상: ["Taliban (탈레반)", "Afghanistan (아프가니스탄)", "US Military (미군)"]
 
 응답 (JSON 배열만):"""
 
 
+
         gemini_response = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}",
             headers={"Content-Type": "application/json"},
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
@@ -157,6 +163,45 @@ def extract_keywords():
         return jsonify({"error": "Gemini 타임아웃", "type": "timeout"}), 504
     except Exception as e:
         return jsonify({"error": str(e), "type": "exception"}), 500
+@app.route('/api/related-keywords', methods=['GET'])
+def get_related_keywords():
+    keyword = request.args.get('keyword', '')
+    
+    if not keyword:
+        return jsonify({"error": "keyword 필요"}), 400
+    
+    try:
+        # YouTube 자동완성 API
+        url = f"https://suggestqueries-clients6.youtube.com/complete/search?client=youtube&ds=yt&q={keyword}"
+        response = requests.get(url, timeout=10)
+        
+        # JSONP 응답 파싱
+        text = response.text
+        # window.google.ac.h(...) 형태에서 JSON 추출
+        start = text.find('(') + 1
+        end = text.rfind(')')
+        json_str = text[start:end]
+        
+        import json
+        data = json.loads(json_str)
+        
+        # 연관 키워드 추출 (첫 번째 배열의 두 번째 요소)
+        suggestions = []
+        if len(data) > 1 and isinstance(data[1], list):
+            for item in data[1][:8]:  # 최대 8개
+                if isinstance(item, list) and len(item) > 0:
+                    suggestion = item[0]
+                    if suggestion != keyword:  # 원본 키워드 제외
+                        suggestions.append(suggestion)
+        
+        return jsonify({
+            "success": True,
+            "keyword": keyword,
+            "related": suggestions[:6]  # 최대 6개
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e), "related": []}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
