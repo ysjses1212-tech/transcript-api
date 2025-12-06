@@ -115,18 +115,19 @@ def extract_keywords():
     
     try:
         # Gemini API 호출
-        prompt = f"""다음 유튜브 영상에서 검색용 키워드를 추출해줘.
+        prompt = f"""유튜브 영상의 검색 키워드를 추출해.
 
 제목: {title}
 설명: {description}
-스크립트: {transcript[:2000] if transcript else '없음'}
+스크립트 일부: {transcript[:1500] if transcript else '없음'}
 
-규칙:
-1. 명사 위주로 추출 (동사/형용사/조사 제외)
-2. 사람들이 실제로 검색할만한 단어만
-3. 3~5개만 추출
-4. 한국어와 영어 모두 가능
-5. JSON 배열로만 응답: ["키워드1", "키워드2", "키워드3"]
+지시사항:
+- 이 영상을 찾기 위해 사람들이 유튜브에서 검색할 단어 3~5개 추출
+- 명사만 (예: 고릴라, 동물원, 꿀팁)
+- 동사/형용사/조사 제외 (예: 친해지는, 귀여운, 에서 제외)
+- 반드시 JSON 배열 형식으로만 응답
+
+예시 응답: ["고릴라", "동물", "꿀팁"]
 
 응답:"""
 
@@ -135,31 +136,39 @@ def extract_keywords():
             headers={"Content-Type": "application/json"},
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.1}
+                "generationConfig": {"temperature": 0.3}
             }
         )
         
         result = response.json()
         
-        # Gemini 응답에서 텍스트 추출
-        text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '[]')
+        # 디버그: 원본 응답 확인
+        raw_text = ""
+        try:
+            raw_text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
+        except:
+            raw_text = str(result)
         
         # JSON 파싱
         import re
-        json_match = re.search(r'\[.*?\]', text, re.DOTALL)
+        keywords = []
+        json_match = re.search(r'\[.*?\]', raw_text, re.DOTALL)
         if json_match:
-            keywords = json.loads(json_match.group())
-        else:
-            keywords = []
+            try:
+                keywords = json.loads(json_match.group())
+            except:
+                pass
         
         return jsonify({
             "success": True,
             "keywords": keywords,
-            "videoType": "keyword" if len(keywords) >= 2 else "content"
+            "videoType": "keyword" if len(keywords) >= 2 else "content",
+            "debug_raw": raw_text[:500]  # 디버그용
         })
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "type": "exception"}), 500
+
 
 
 if __name__ == '__main__':
