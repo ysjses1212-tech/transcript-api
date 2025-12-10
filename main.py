@@ -196,6 +196,53 @@ def get_related_keywords():
         
     except Exception as e:
         return jsonify({"error": str(e), "related": []}), 500
+@app.route('/api/summarize', methods=['POST'])
+def summarize_video():
+    data = request.get_json() or {}
+    transcript = data.get('transcript', '')
+    title = data.get('title', '')
+    
+    if not transcript:
+        return jsonify({"error": "transcript 필요"}), 400
+    
+    try:
+        prompt = f"""다음 유튜브 영상 스크립트를 한국어로 요약해줘.
+
+**영상 제목:** {title}
+
+**요약 형식:**
+1. 📌 핵심 내용 (3-5줄)
+2. 🎯 주요 포인트 (3-5개 bullet)
+3. 💡 결론/인사이트 (1-2줄)
+
+**스크립트:**
+{transcript[:8000]}
+
+간결하고 핵심만 요약해줘."""
+
+        gemini_response = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
+            headers={"Content-Type": "application/json"},
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.3}
+            },
+            timeout=30
+        )
+        
+        result = gemini_response.json()
+        
+        if 'candidates' in result:
+            summary = result['candidates'][0]['content']['parts'][0]['text']
+            return jsonify({
+                "success": True,
+                "summary": summary
+            })
+        else:
+            return jsonify({"error": "요약 생성 실패", "detail": result}), 500
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
